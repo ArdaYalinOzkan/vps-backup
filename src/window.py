@@ -59,6 +59,7 @@ class BackupWindow(Adw.ApplicationWindow):
         self.download_dir = str(Path.home() / 'Downloads')
         self.current_remote_path = '/'
         self.downloads_in_progress = []
+        self._size_cancel = False
 
         config = load_config()
         if config.get('selected_paths'):
@@ -387,6 +388,7 @@ class BackupWindow(Adw.ApplicationWindow):
     def _browse_to(self, path):
         if not self.connection.connected:
             return
+        self._size_cancel = True
         self.current_remote_path = path
         self.path_label.set_label(path)
         self.browse_stack.set_visible_child_name('loading')
@@ -552,10 +554,18 @@ class BackupWindow(Adw.ApplicationWindow):
             threading.Thread(target=self._calculate_total_size, daemon=True).start()
 
     def _calculate_total_size(self):
+        self._size_cancel = False
         total = 0
         for path in self.selected_paths:
-            total += self.connection.get_size(path)
-        GLib.idle_add(self.size_label.set_label, f"Total download: {format_size(total)}")
+            if self._size_cancel:
+                return
+            try:
+                with self.connection.lock:
+                    attr = self.connection.sftp.stat(path)
+                total += attr.st_size
+            except Exception:
+                pass
+        GLib.idle_add(self.size_label.set_label, f"Total download: ~{format_size(total)}")
 
     def _on_rename_item(self, button, path):
         dialog = Adw.MessageDialog(transient_for=self)

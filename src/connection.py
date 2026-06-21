@@ -28,7 +28,7 @@ class SFTPConnection:
         self.client = None
         self.sftp = None
         self.connected = False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def connect(self, host, username, password, port=22):
         self.client = paramiko.SSHClient()
@@ -92,8 +92,6 @@ class SFTPConnection:
                 remote_child = os.path.join(remote_path, attr.filename)
                 local_child = os.path.join(local_path, attr.filename)
                 if stat.S_ISDIR(attr.st_mode):
-                    self.lock.release()
                     self.download_dir(remote_child, local_child, callback)
-                    self.lock.acquire()
                 else:
                     self.sftp.get(remote_child, local_child, callback=callback)
