@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.vpsbackup.VpsBackup</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>VPS Backup</name>
+  <summary>Backup files from your VPS server</summary>
+  <description>
+    <p>
+      A simple GNOME application to browse and backup files from remote servers
+      via SFTP. Features include remembering server credentials, selecting specific
+      paths for backup, and monitoring download progress.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.vpsbackup.VpsBackup.desktop</launchable>
+  <url type="homepage">https://github.com/vpsbackup/vps-backup</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-06-21">
+      <description>
+        <p>Initial release</p>
+      </description>
+    </release>
+  </releases>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+</component>

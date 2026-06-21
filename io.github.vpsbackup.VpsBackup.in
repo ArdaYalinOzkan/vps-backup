@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+import os
+import sys
+import signal
+
+pkgdatadir = '@pkgdatadir@'
+sys.path.insert(1, pkgdatadir)
+
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+if __name__ == '__main__':
+    import gi
+    gi.require_version('Gtk', '4.0')
+    gi.require_version('Adw', '1')
+
+    from gi.repository import Gio
+    resource_path = os.path.join(pkgdatadir, 'io.github.vpsbackup.VpsBackup.gresource')
+    if os.path.exists(resource_path):
+        resource = Gio.Resource.load(resource_path)
+        resource._register()
+
+    from src.main import main
+    sys.exit(main())
