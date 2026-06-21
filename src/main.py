@@ -12,7 +12,7 @@ from .window import BackupWindow
 class BackupApplication(Adw.Application):
     def __init__(self):
         super().__init__(
-            application_id='io.github.vpsbackup.VpsBackup',
+            application_id='io.github.ArdaYalinOzkan.VpsBackup',
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS
         )
 

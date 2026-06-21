@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="vps-backup">
-  <schema id="io.github.vpsbackup.VpsBackup" path="/io/github/vpsbackup/VpsBackup/">
+  <schema id="io.github.ArdaYalinOzkan.VpsBackup" path="/io/github/vpsbackup/VpsBackup/">
     <key name="window-width" type="i">
       <default>900</default>
     </key>

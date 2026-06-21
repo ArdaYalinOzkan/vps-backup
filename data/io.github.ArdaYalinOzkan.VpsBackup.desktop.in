@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=VPS Backup
 Comment=Backup files from your VPS server
-Exec=io.github.vpsbackup.VpsBackup
-Icon=io.github.vpsbackup.VpsBackup
+Exec=io.github.ArdaYalinOzkan.VpsBackup
+Icon=io.github.ArdaYalinOzkan.VpsBackup
 Terminal=false
 Type=Application
 Categories=Utility;System;

@@ -18,8 +18,8 @@ conf.set('VERSION', meson.project_version())
 conf.set('pkgdatadir', pkgdatadir)
 
 configure_file(
-  input: 'io.github.vpsbackup.VpsBackup.in',
-  output: 'io.github.vpsbackup.VpsBackup',
+  input: 'io.github.ArdaYalinOzkan.VpsBackup.in',
+  output: 'io.github.ArdaYalinOzkan.VpsBackup',
   configuration: conf,
   install: true,
   install_dir: get_option('bindir'),
