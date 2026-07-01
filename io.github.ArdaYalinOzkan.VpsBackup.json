@@ -96,7 +96,7 @@
                 {
                     "type": "git",
                     "url": "https://github.com/ArdaYalinOzkan/vps-backup.git",
-                    "branch": "main"
+                    "commit": "b6497e7853872c91a73f81f596ff196642c09d4e"
                 }
             ]
         }
