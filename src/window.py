@@ -2,6 +2,7 @@ import gi
 import os
 import stat
 import threading
+import time
 from pathlib import Path
 
 gi.require_version('Gtk', '4.0')
@@ -70,7 +71,6 @@ class BackupWindow(Adw.ApplicationWindow):
             self.download_dir = config['download_dir']
 
         self._build_ui()
-        self._try_auto_connect(config)
 
     def _build_ui(self):
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -321,13 +321,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.view_stack.add_titled_with_icon(browse_box, 'browse', 'Browse', 'folder-symbolic')
 
     # ─── CONNECTION ──────────────────────────────────────────
-
-    def _try_auto_connect(self, config):
-        if config.get('remember') and config.get('host'):
-            threading.Thread(target=self._do_connect,
-                           args=(config['host'], config.get('port', 22),
-                                 config['username'], config['password']),
-                           daemon=True).start()
 
     def _on_connect(self, button):
         host = self.host_row.get_text().strip()
@@ -627,27 +620,58 @@ class BackupWindow(Adw.ApplicationWindow):
         threading.Thread(target=self._do_backup, args=(paths_to_backup,), daemon=True).start()
 
     def _do_backup(self, paths):
-        total_size = sum(self.connection.get_size(p) for p in paths)
-        info = {'total': total_size, 'downloaded': 0, 'done': False, 'local_path': self.download_dir}
+        info = {'total': 0, 'downloaded': 0, 'done': False, 'local_path': self.download_dir, 'errors': []}
         self.downloads_in_progress.append(info)
         GLib.idle_add(self._update_download_popup)
 
         for path in paths:
             local_path = os.path.join(self.download_dir, os.path.basename(path))
             try:
-                attr = self.connection.sftp.stat(path)
+                with self.connection.lock:
+                    attr = self.connection.sftp.stat(path)
                 if stat.S_ISDIR(attr.st_mode):
-                    self.connection.download_dir(path, local_path)
+                    self._download_dir_tracked(path, local_path, info)
                 else:
-                    self.connection.download_file(path, local_path)
-                info['downloaded'] += self.connection.get_size(path)
-                GLib.idle_add(self._update_download_popup)
+                    info['total'] += attr.st_size
+                    GLib.idle_add(self._update_download_popup)
+                    self._download_file_tracked(path, local_path, info)
             except Exception as e:
-                print(f"Error: {e}")
+                info['errors'].append(f"{os.path.basename(path)}: {e}")
 
         info['done'] = True
         GLib.idle_add(self._update_download_popup)
         GLib.idle_add(self._on_backup_done)
+
+    def _download_file_tracked(self, remote_path, local_path, info):
+        prev = [0]
+        last_ui = [0.0]
+        def callback(transferred, total_file):
+            delta = transferred - prev[0]
+            prev[0] = transferred
+            info['downloaded'] += delta
+            now = time.monotonic()
+            if now - last_ui[0] > 0.15:
+                last_ui[0] = now
+                GLib.idle_add(self._update_download_popup)
+        with self.connection.lock:
+            self.connection.sftp.get(remote_path, local_path, callback=callback)
+
+    def _download_dir_tracked(self, remote_path, local_path, info):
+        os.makedirs(local_path, exist_ok=True)
+        with self.connection.lock:
+            entries = list(self.connection.sftp.listdir_attr(remote_path))
+        for attr in entries:
+            rchild = os.path.join(remote_path, attr.filename)
+            lchild = os.path.join(local_path, attr.filename)
+            try:
+                if stat.S_ISDIR(attr.st_mode):
+                    self._download_dir_tracked(rchild, lchild, info)
+                else:
+                    info['total'] += attr.st_size
+                    GLib.idle_add(self._update_download_popup)
+                    self._download_file_tracked(rchild, lchild, info)
+            except Exception as e:
+                info['errors'].append(f"{attr.filename}: {e}")
 
     def _on_backup_done(self):
         self.backup_button.set_sensitive(True)
@@ -669,6 +693,13 @@ class BackupWindow(Adw.ApplicationWindow):
                 done_row.append(label)
                 box.append(done_row)
 
+                for err in info.get('errors', []):
+                    err_label = Gtk.Label(label=f"⚠ {err}")
+                    err_label.add_css_class('error')
+                    err_label.set_wrap(True)
+                    err_label.set_halign(Gtk.Align.START)
+                    box.append(err_label)
+
                 open_btn = Gtk.Button(label="Show in Files")
                 open_btn.add_css_class('flat')
                 open_btn.connect('clicked', self._open_in_files, info['local_path'])
@@ -680,12 +711,12 @@ class BackupWindow(Adw.ApplicationWindow):
 
                 progress = Gtk.ProgressBar()
                 frac = info['downloaded'] / info['total'] if info['total'] > 0 else 0
-                progress.set_fraction(frac)
+                progress.set_fraction(min(frac, 1.0))
                 progress.set_text(f"{format_size(info['downloaded'])} / {format_size(info['total'])}")
                 progress.set_show_text(True)
                 box.append(progress)
 
-                remaining = info['total'] - info['downloaded']
+                remaining = max(0, info['total'] - info['downloaded'])
                 rem_label = Gtk.Label(label=f"{format_size(remaining)} remaining")
                 rem_label.set_halign(Gtk.Align.START)
                 rem_label.add_css_class('dim-label')
