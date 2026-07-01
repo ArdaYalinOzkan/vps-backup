@@ -13,6 +13,62 @@ from gi.repository import Gtk, Adw, Gio, GLib, Pango, Gdk
 from .connection import SFTPConnection, load_config, save_config
 
 
+_SERVICE_PATTERNS = [
+    {'name': 'Immich', 'desc': 'Photo & video library', 'icon': 'image-x-generic-symbolic',
+     'paths': ['/root/immich/library', '/root/immich/upload', '/home/immich',
+               '/opt/immich/library', '/srv/immich', '/var/lib/immich', '/data/immich']},
+    {'name': 'Jellyfin', 'desc': 'Media server data', 'icon': 'video-x-generic-symbolic',
+     'paths': ['/var/lib/jellyfin', '/opt/jellyfin', '/config/jellyfin',
+               '/data/jellyfin', '/srv/jellyfin', '/jellyfin']},
+    {'name': 'Nextcloud', 'desc': 'File sync & share data', 'icon': 'folder-symbolic',
+     'paths': ['/var/www/nextcloud/data', '/var/lib/nextcloud/data',
+               '/opt/nextcloud', '/srv/nextcloud', '/data/nextcloud']},
+    {'name': 'Vaultwarden', 'desc': 'Password vault', 'icon': 'dialog-password-symbolic',
+     'paths': ['/var/lib/vaultwarden', '/opt/vaultwarden/data',
+               '/srv/vaultwarden', '/data/vaultwarden', '/vaultwarden']},
+    {'name': 'Gitea / Forgejo', 'desc': 'Git repositories', 'icon': 'folder-symbolic',
+     'paths': ['/var/lib/gitea', '/opt/gitea', '/home/git',
+               '/srv/gitea', '/var/lib/forgejo', '/opt/forgejo']},
+    {'name': 'Home Assistant', 'desc': 'Smart home config', 'icon': 'folder-symbolic',
+     'paths': ['/config', '/homeassistant', '/home/homeassistant/.homeassistant',
+               '/opt/homeassistant']},
+    {'name': 'Syncthing', 'desc': 'Sync configuration', 'icon': 'folder-symbolic',
+     'paths': ['/var/lib/syncthing', '/root/.config/syncthing',
+               '/root/.local/share/syncthing']},
+    {'name': 'Plex', 'desc': 'Media server', 'icon': 'video-x-generic-symbolic',
+     'paths': ['/var/lib/plexmediaserver', '/opt/plex', '/srv/plex']},
+    {'name': 'Paperless-ngx', 'desc': 'Document archive', 'icon': 'folder-symbolic',
+     'paths': ['/opt/paperless/data', '/srv/paperless', '/var/lib/paperless']},
+    {'name': 'PostgreSQL', 'desc': 'Database files', 'icon': 'folder-symbolic',
+     'paths': ['/var/lib/postgresql']},
+    {'name': 'MySQL / MariaDB', 'desc': 'Database files', 'icon': 'folder-symbolic',
+     'paths': ['/var/lib/mysql', '/var/lib/mariadb']},
+    {'name': 'Docker Volumes', 'desc': 'Container data volumes', 'icon': 'folder-symbolic',
+     'paths': ['/var/lib/docker/volumes']},
+]
+
+_SERVICE_KEYWORDS = {
+    'immich': ('Immich', 'Photo & video library', 'image-x-generic-symbolic'),
+    'jellyfin': ('Jellyfin', 'Media server', 'video-x-generic-symbolic'),
+    'plex': ('Plex', 'Media server', 'video-x-generic-symbolic'),
+    'nextcloud': ('Nextcloud', 'File sync & share', 'folder-symbolic'),
+    'vaultwarden': ('Vaultwarden', 'Password vault', 'dialog-password-symbolic'),
+    'bitwarden': ('Vaultwarden', 'Password vault', 'dialog-password-symbolic'),
+    'gitea': ('Gitea', 'Git repositories', 'folder-symbolic'),
+    'forgejo': ('Forgejo', 'Git repositories', 'folder-symbolic'),
+    'homeassistant': ('Home Assistant', 'Smart home', 'folder-symbolic'),
+    'syncthing': ('Syncthing', 'File sync', 'folder-symbolic'),
+    'paperless': ('Paperless-ngx', 'Document archive', 'folder-symbolic'),
+    'pihole': ('Pi-hole', 'DNS ad blocker', 'folder-symbolic'),
+    'adguard': ('AdGuard Home', 'DNS ad blocker', 'folder-symbolic'),
+    'miniflux': ('Miniflux', 'RSS reader', 'folder-symbolic'),
+    'freshrss': ('FreshRSS', 'RSS reader', 'folder-symbolic'),
+    'mealie': ('Mealie', 'Recipe manager', 'folder-symbolic'),
+    'memos': ('Memos', 'Note taking', 'folder-symbolic'),
+    'uptime': ('Uptime Kuma', 'Status monitor', 'folder-symbolic'),
+}
+
+
 def format_size(size_bytes):
     if size_bytes < 1024:
         return f"{size_bytes} B"
@@ -36,14 +92,13 @@ def icon_for_entry(entry):
         return 'audio-x-generic'
     elif name.endswith(('.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar')):
         return 'package-x-generic'
-    elif name.endswith(('.py', '.js', '.ts', '.c', '.h', '.rs', '.go', '.sh', '.json', '.xml', '.yaml', '.toml', '.html', '.css')):
+    elif name.endswith(('.py', '.js', '.ts', '.c', '.h', '.rs', '.go', '.sh',
+                        '.json', '.xml', '.yaml', '.toml', '.html', '.css')):
         return 'text-x-script'
     elif name.endswith(('.txt', '.md', '.log', '.csv')):
         return 'text-x-generic'
     elif name.endswith(('.pdf',)):
         return 'x-office-document'
-    elif name.endswith(('.conf', '.cfg', '.ini')):
-        return 'application-x-executable'
     else:
         return 'text-x-generic'
 
@@ -57,10 +112,12 @@ class BackupWindow(Adw.ApplicationWindow):
         self.connection = SFTPConnection()
         self.selected_paths = []
         self.selected_display_names = {}
-        self.download_dir = str(Path.home() / 'Downloads')
+        self.download_dir = str(Path.home() / 'Documents' / 'VPS Backup')
         self.current_remote_path = '/'
         self.downloads_in_progress = []
         self._size_cancel = False
+        self._recommendations = None
+        self._rec_scanning = False
 
         config = load_config()
         if config.get('selected_paths'):
@@ -79,7 +136,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.header = Adw.HeaderBar()
         self.main_box.append(self.header)
 
-        # Download indicator button (hidden until download starts)
         self.download_button = Gtk.MenuButton()
         self.download_button.set_icon_name('folder-download-symbolic')
         self.download_button.set_visible(False)
@@ -94,7 +150,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.download_button.set_popover(self.download_popover)
         self.header.pack_end(self.download_button)
 
-        # View stack with switcher in header
         self.view_stack = Adw.ViewStack()
         self.main_box.append(self.view_stack)
 
@@ -104,7 +159,10 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.switcher_bar = Adw.ViewSwitcherBar()
         self.switcher_bar.set_stack(self.view_stack)
-        self.switcher_title.connect('notify::title-visible', lambda *a: self.switcher_bar.set_reveal(self.switcher_title.get_title_visible()))
+        self.switcher_title.connect(
+            'notify::title-visible',
+            lambda *a: self.switcher_bar.set_reveal(self.switcher_title.get_title_visible())
+        )
         self.main_box.append(self.switcher_bar)
 
         self._build_login_page()
@@ -182,7 +240,6 @@ class BackupWindow(Adw.ApplicationWindow):
     def _build_backup_page(self):
         self.backup_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Empty state
         self.backup_empty = Adw.StatusPage()
         self.backup_empty.set_title("No Paths Selected")
         self.backup_empty.set_description("Browse your server and select files or folders to back up.")
@@ -195,7 +252,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.backup_empty.set_child(browse_btn)
         self.backup_box.append(self.backup_empty)
 
-        # Content state (hidden initially)
         self.backup_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.backup_content.set_visible(False)
         self.backup_box.append(self.backup_content)
@@ -215,13 +271,12 @@ class BackupWindow(Adw.ApplicationWindow):
         scrolled.set_child(self.backup_list)
         self.backup_content.append(scrolled)
 
-        # Bottom bar
         bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         bottom.set_margin_start(16)
         bottom.set_margin_end(16)
         bottom.set_margin_bottom(16)
 
-        dir_row = Adw.ActionRow(title="Download Location")
+        dir_row = Adw.ActionRow(title="Backup Location")
         dir_row.set_subtitle(self.download_dir)
         dir_row.add_css_class('card')
         dir_btn = Gtk.Button(icon_name='folder-open-symbolic')
@@ -247,14 +302,15 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.backup_content.append(bottom)
 
-        self.view_stack.add_titled_with_icon(self.backup_box, 'backup', 'Backup', 'drive-harddisk-symbolic')
+        self.view_stack.add_titled_with_icon(
+            self.backup_box, 'backup', 'Backup', 'drive-harddisk-symbolic'
+        )
 
     # ─── BROWSE ──────────────────────────────────────────────
 
     def _build_browse_page(self):
         browse_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Navigation bar
         nav_bar = Gtk.Box(spacing=6)
         nav_bar.set_margin_top(8)
         nav_bar.set_margin_bottom(8)
@@ -281,6 +337,19 @@ class BackupWindow(Adw.ApplicationWindow):
         self.path_label.set_margin_start(8)
         nav_bar.append(self.path_label)
 
+        # ── Recommendations dropdown ──
+        self.rec_popover = Gtk.Popover()
+        self.rec_popover.set_size_request(380, -1)
+        self.rec_pop_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.rec_popover.set_child(self.rec_pop_box)
+
+        rec_btn = Gtk.MenuButton()
+        rec_btn.set_label("Recommended")
+        rec_btn.add_css_class('flat')
+        rec_btn.set_popover(self.rec_popover)
+        rec_btn.connect('notify::active', self._on_rec_btn_toggled)
+        nav_bar.append(rec_btn)
+
         select_cur_btn = Gtk.Button(label="Select This Folder")
         select_cur_btn.add_css_class('flat')
         select_cur_btn.connect('clicked', self._on_select_current_folder)
@@ -289,12 +358,10 @@ class BackupWindow(Adw.ApplicationWindow):
         browse_box.append(nav_bar)
         browse_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # Stack for file list vs spinner
         self.browse_stack = Gtk.Stack()
         self.browse_stack.set_vexpand(True)
         self.browse_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
-        # File list
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_kinetic_scrolling(True)
@@ -307,7 +374,6 @@ class BackupWindow(Adw.ApplicationWindow):
         scrolled.set_child(self.file_list)
         self.browse_stack.add_named(scrolled, 'list')
 
-        # Loading spinner
         spinner_box = Gtk.Box()
         spinner_box.set_halign(Gtk.Align.CENTER)
         spinner_box.set_valign(Gtk.Align.CENTER)
@@ -348,7 +414,9 @@ class BackupWindow(Adw.ApplicationWindow):
                 'download_dir': self.download_dir,
             })
 
-        threading.Thread(target=self._do_connect, args=(host, port, username, password), daemon=True).start()
+        threading.Thread(
+            target=self._do_connect, args=(host, port, username, password), daemon=True
+        ).start()
 
     def _do_connect(self, host, port, username, password):
         try:
@@ -361,6 +429,8 @@ class BackupWindow(Adw.ApplicationWindow):
         self.connect_button.set_sensitive(True)
         self.connect_button.set_label("Connect")
         self.login_status.set_visible(False)
+        self._recommendations = None
+        self._rec_scanning = False
         self.view_stack.set_visible_child_name('backup')
         self._refresh_backup_list(skip_size=True)
         try:
@@ -375,6 +445,159 @@ class BackupWindow(Adw.ApplicationWindow):
         self.connect_button.set_label("Connect")
         self.login_status.set_label(f"Failed: {error}")
         self.login_status.set_visible(True)
+
+    # ─── RECOMMENDATIONS ─────────────────────────────────────
+
+    def _on_rec_btn_toggled(self, btn, _param):
+        if not btn.get_active():
+            return
+
+        if not self.connection.connected:
+            self._clear_box(self.rec_pop_box)
+            lbl = Gtk.Label(label="Not connected to a server")
+            lbl.add_css_class('dim-label')
+            lbl.set_margin_top(16)
+            lbl.set_margin_bottom(16)
+            lbl.set_margin_start(16)
+            lbl.set_margin_end(16)
+            self.rec_pop_box.append(lbl)
+            return
+
+        if self._recommendations is not None or self._rec_scanning:
+            return  # already have results or in progress
+
+        # Show spinner and start scan
+        self._clear_box(self.rec_pop_box)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(16)
+        row.set_margin_bottom(16)
+        row.set_margin_start(16)
+        row.set_margin_end(16)
+        sp = Gtk.Spinner()
+        sp.start()
+        row.append(sp)
+        row.append(Gtk.Label(label="Analyzing server structure..."))
+        self.rec_pop_box.append(row)
+
+        self._rec_scanning = True
+        threading.Thread(target=self._scan_recommendations, daemon=True).start()
+
+    def _scan_recommendations(self):
+        found = []
+        seen = set()
+
+        for pattern in _SERVICE_PATTERNS:
+            for path in pattern['paths']:
+                if path in seen:
+                    continue
+                try:
+                    with self.connection.lock:
+                        self.connection.sftp.stat(path)
+                    found.append({
+                        'name': pattern['name'],
+                        'desc': pattern['desc'],
+                        'icon': pattern['icon'],
+                        'path': path,
+                    })
+                    seen.add(path)
+                    break
+                except Exception:
+                    pass
+
+        scan_roots = ['/', '/root', '/opt', '/srv', '/data', '/home', '/var/lib']
+        if self.current_remote_path not in scan_roots:
+            scan_roots.append(self.current_remote_path)
+
+        for root in scan_roots:
+            try:
+                with self.connection.lock:
+                    entries = self.connection.sftp.listdir_attr(root)
+                for attr in entries:
+                    if not stat.S_ISDIR(attr.st_mode):
+                        continue
+                    path = os.path.join(root, attr.filename)
+                    if path in seen:
+                        continue
+                    name_lower = attr.filename.lower()
+                    for kw, (svc, desc, icon) in _SERVICE_KEYWORDS.items():
+                        if kw in name_lower:
+                            found.append({'name': svc, 'desc': desc, 'icon': icon, 'path': path})
+                            seen.add(path)
+                            break
+            except Exception:
+                pass
+
+        self._rec_scanning = False
+        self._recommendations = found
+        GLib.idle_add(self._populate_recommendations_ui)
+
+    def _populate_recommendations_ui(self):
+        self._clear_box(self.rec_pop_box)
+
+        if not self._recommendations:
+            lbl = Gtk.Label(label="No known services found on this server")
+            lbl.add_css_class('dim-label')
+            lbl.set_wrap(True)
+            lbl.set_margin_top(16)
+            lbl.set_margin_bottom(16)
+            lbl.set_margin_start(16)
+            lbl.set_margin_end(16)
+            self.rec_pop_box.append(lbl)
+            return
+
+        hdr = Gtk.Label(label="Detected services")
+        hdr.add_css_class('heading')
+        hdr.set_halign(Gtk.Align.START)
+        hdr.set_margin_top(12)
+        hdr.set_margin_start(12)
+        hdr.set_margin_bottom(4)
+        self.rec_pop_box.append(hdr)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.add_css_class('boxed-list')
+        listbox.set_margin_top(4)
+        listbox.set_margin_bottom(12)
+        listbox.set_margin_start(8)
+        listbox.set_margin_end(8)
+
+        for rec in self._recommendations:
+            row = Adw.ActionRow()
+            row.set_title(rec['name'])
+            row.set_subtitle(rec['path'])
+
+            ico = Gtk.Image.new_from_icon_name(rec['icon'])
+            ico.set_pixel_size(24)
+            row.add_prefix(ico)
+
+            view_btn = Gtk.Button(label="View")
+            view_btn.add_css_class('flat')
+            view_btn.set_valign(Gtk.Align.CENTER)
+            view_btn.connect('clicked', self._on_rec_view, rec['path'])
+            row.add_suffix(view_btn)
+
+            add_btn = Gtk.Button(label="Add")
+            add_btn.add_css_class('suggested-action')
+            add_btn.add_css_class('flat')
+            add_btn.set_valign(Gtk.Align.CENTER)
+            add_btn.connect('clicked', self._on_rec_add, rec['path'])
+            row.add_suffix(add_btn)
+
+            listbox.append(row)
+
+        self.rec_pop_box.append(listbox)
+
+    def _on_rec_view(self, _btn, path):
+        self.rec_popover.popdown()
+        self.view_stack.set_visible_child_name('browse')
+        self._browse_to(path)
+
+    def _on_rec_add(self, _btn, path):
+        if path not in self.selected_paths:
+            self.selected_paths.append(path)
+            self._save_state()
+            self._refresh_file_list_local()
+            self._refresh_backup_list()
 
     # ─── BROWSE LOGIC ────────────────────────────────────────
 
@@ -417,7 +640,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self._cached_entries = entries
         for entry in entries:
             self._append_file_row(entry)
-
         self.browse_stack.set_visible_child_name('list')
 
     def _append_file_row(self, entry):
@@ -432,25 +654,20 @@ class BackupWindow(Adw.ApplicationWindow):
 
         is_selected = entry['path'] in self.selected_paths
 
-        # Selected indicator
         if is_selected:
             check = Gtk.Image.new_from_icon_name('object-select-symbolic')
             check.add_css_class('success')
             row.add_suffix(check)
 
-        # Select/deselect button
-        if is_selected:
-            sel_btn = Gtk.Button(icon_name='list-remove-symbolic')
-            sel_btn.set_tooltip_text("Remove from backup")
-        else:
-            sel_btn = Gtk.Button(icon_name='list-add-symbolic')
-            sel_btn.set_tooltip_text("Add to backup")
+        sel_btn = Gtk.Button(
+            icon_name='list-remove-symbolic' if is_selected else 'list-add-symbolic'
+        )
+        sel_btn.set_tooltip_text("Remove from backup" if is_selected else "Add to backup")
         sel_btn.set_valign(Gtk.Align.CENTER)
         sel_btn.add_css_class('flat')
         sel_btn.connect('clicked', self._on_select_item, entry['path'])
         row.add_suffix(sel_btn)
 
-        # Navigate arrow for directories
         if entry['is_dir']:
             arrow = Gtk.Image.new_from_icon_name('go-next-symbolic')
             arrow.add_css_class('dim-label')
@@ -460,15 +677,15 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.file_list.append(row)
 
-    def _on_row_activated(self, row, path):
+    def _on_row_activated(self, _row, path):
         self._browse_to(path)
 
-    def _on_browse_back(self, button):
+    def _on_browse_back(self, _btn):
         parent = os.path.dirname(self.current_remote_path)
         if parent and parent != self.current_remote_path:
             self._browse_to(parent)
 
-    def _on_browse_home(self, button):
+    def _on_browse_home(self, _btn):
         if self.connection.connected:
             try:
                 home = self.connection.sftp.normalize('.')
@@ -476,10 +693,10 @@ class BackupWindow(Adw.ApplicationWindow):
             except Exception:
                 self._browse_to('/')
 
-    def _on_select_current_folder(self, button):
+    def _on_select_current_folder(self, _btn):
         self._toggle_selection(self.current_remote_path)
 
-    def _on_select_item(self, button, path):
+    def _on_select_item(self, _btn, path):
         self._toggle_selection(path)
 
     def _toggle_selection(self, path):
@@ -525,7 +742,6 @@ class BackupWindow(Adw.ApplicationWindow):
             row.add_prefix(check)
             row.set_activatable_widget(check)
 
-            # Rename button
             rename_btn = Gtk.Button(icon_name='document-edit-symbolic')
             rename_btn.set_valign(Gtk.Align.CENTER)
             rename_btn.add_css_class('flat')
@@ -533,7 +749,6 @@ class BackupWindow(Adw.ApplicationWindow):
             rename_btn.connect('clicked', self._on_rename_item, path)
             row.add_suffix(rename_btn)
 
-            # Remove button
             remove_btn = Gtk.Button(icon_name='edit-delete-symbolic')
             remove_btn.set_valign(Gtk.Align.CENTER)
             remove_btn.add_css_class('flat')
@@ -558,9 +773,9 @@ class BackupWindow(Adw.ApplicationWindow):
                 total += attr.st_size
             except Exception:
                 pass
-        GLib.idle_add(self.size_label.set_label, f"Total download: ~{format_size(total)}")
+        GLib.idle_add(self.size_label.set_label, f"~{format_size(total)} on server")
 
-    def _on_rename_item(self, button, path):
+    def _on_rename_item(self, _btn, path):
         dialog = Adw.MessageDialog(transient_for=self)
         dialog.set_heading("Rename Label")
         dialog.set_body("This only changes the display name, not the actual file.")
@@ -576,7 +791,7 @@ class BackupWindow(Adw.ApplicationWindow):
         dialog.connect('response', self._on_rename_response, path, entry)
         dialog.present()
 
-    def _on_rename_response(self, dialog, response, path, entry):
+    def _on_rename_response(self, _dialog, response, path, entry):
         if response == 'rename':
             name = entry.get_text().strip()
             if name:
@@ -584,14 +799,14 @@ class BackupWindow(Adw.ApplicationWindow):
                 self._save_state()
                 self._refresh_backup_list()
 
-    def _on_remove_item(self, button, path):
+    def _on_remove_item(self, _btn, path):
         if path in self.selected_paths:
             self.selected_paths.remove(path)
             self.selected_display_names.pop(path, None)
             self._save_state()
             self._refresh_backup_list()
 
-    def _choose_download_dir(self, button):
+    def _choose_download_dir(self, _btn):
         dialog = Gtk.FileDialog()
         dialog.select_folder(self, None, self._on_dir_chosen)
 
@@ -605,7 +820,7 @@ class BackupWindow(Adw.ApplicationWindow):
         except Exception:
             pass
 
-    def _on_backup(self, button):
+    def _on_backup(self, _btn):
         if not self.connection.connected:
             return
 
@@ -620,32 +835,76 @@ class BackupWindow(Adw.ApplicationWindow):
         threading.Thread(target=self._do_backup, args=(paths_to_backup,), daemon=True).start()
 
     def _do_backup(self, paths):
-        info = {'total': 0, 'downloaded': 0, 'done': False, 'local_path': self.download_dir, 'errors': []}
+        info = {
+            'total': 0, 'downloaded': 0, 'done': False,
+            'local_path': self.download_dir, 'errors': [],
+            'scanning': True, 'files_total': 0, 'files_done': 0,
+        }
         self.downloads_in_progress.append(info)
         GLib.idle_add(self._update_download_popup)
 
+        os.makedirs(self.download_dir, exist_ok=True)
+
+        # Phase 1: scan remote vs local, collect only files that need downloading
+        files_to_download = []
         for path in paths:
             local_path = os.path.join(self.download_dir, os.path.basename(path))
             try:
-                with self.connection.lock:
-                    attr = self.connection.sftp.stat(path)
-                if stat.S_ISDIR(attr.st_mode):
-                    self._download_dir_tracked(path, local_path, info)
-                else:
-                    info['total'] += attr.st_size
-                    GLib.idle_add(self._update_download_popup)
-                    self._download_file_tracked(path, local_path, info)
+                self._collect_files_to_download(path, local_path, files_to_download)
             except Exception as e:
                 info['errors'].append(f"{os.path.basename(path)}: {e}")
+
+        info['scanning'] = False
+        info['total'] = sum(sz for _, _, sz in files_to_download)
+        info['files_total'] = len(files_to_download)
+        GLib.idle_add(self._update_download_popup)
+
+        # Phase 2: download with fixed denominator
+        for remote_path, local_path, size in files_to_download:
+            try:
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                self._download_file_tracked(remote_path, local_path, info)
+                info['files_done'] += 1
+            except Exception as e:
+                info['errors'].append(f"{os.path.basename(remote_path)}: {e}")
+                info['downloaded'] += size  # advance progress past failed file
 
         info['done'] = True
         GLib.idle_add(self._update_download_popup)
         GLib.idle_add(self._on_backup_done)
 
+    def _collect_files_to_download(self, remote_path, local_path, file_list):
+        with self.connection.lock:
+            attr = self.connection.sftp.stat(remote_path)
+
+        if stat.S_ISDIR(attr.st_mode):
+            with self.connection.lock:
+                entries = list(self.connection.sftp.listdir_attr(remote_path))
+            for entry_attr in entries:
+                rchild = os.path.join(remote_path, entry_attr.filename)
+                lchild = os.path.join(local_path, entry_attr.filename)
+                if stat.S_ISDIR(entry_attr.st_mode):
+                    self._collect_files_to_download(rchild, lchild, file_list)
+                else:
+                    try:
+                        if os.stat(lchild).st_size == entry_attr.st_size:
+                            continue  # already up to date
+                    except OSError:
+                        pass
+                    file_list.append((rchild, lchild, entry_attr.st_size))
+        else:
+            try:
+                if os.stat(local_path).st_size == attr.st_size:
+                    return  # already up to date
+            except OSError:
+                pass
+            file_list.append((remote_path, local_path, attr.st_size))
+
     def _download_file_tracked(self, remote_path, local_path, info):
         prev = [0]
         last_ui = [0.0]
-        def callback(transferred, total_file):
+
+        def callback(transferred, _total_file):
             delta = transferred - prev[0]
             prev[0] = transferred
             info['downloaded'] += delta
@@ -653,25 +912,9 @@ class BackupWindow(Adw.ApplicationWindow):
             if now - last_ui[0] > 0.15:
                 last_ui[0] = now
                 GLib.idle_add(self._update_download_popup)
+
         with self.connection.lock:
             self.connection.sftp.get(remote_path, local_path, callback=callback)
-
-    def _download_dir_tracked(self, remote_path, local_path, info):
-        os.makedirs(local_path, exist_ok=True)
-        with self.connection.lock:
-            entries = list(self.connection.sftp.listdir_attr(remote_path))
-        for attr in entries:
-            rchild = os.path.join(remote_path, attr.filename)
-            lchild = os.path.join(local_path, attr.filename)
-            try:
-                if stat.S_ISDIR(attr.st_mode):
-                    self._download_dir_tracked(rchild, lchild, info)
-                else:
-                    info['total'] += attr.st_size
-                    GLib.idle_add(self._update_download_popup)
-                    self._download_file_tracked(rchild, lchild, info)
-            except Exception as e:
-                info['errors'].append(f"{attr.filename}: {e}")
 
     def _on_backup_done(self):
         self.backup_button.set_sensitive(True)
@@ -683,48 +926,71 @@ class BackupWindow(Adw.ApplicationWindow):
         for info in self.downloads_in_progress:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-            if info['done']:
+            if info.get('scanning'):
+                row = Gtk.Box(spacing=8)
+                sp = Gtk.Spinner()
+                sp.start()
+                row.append(sp)
+                lbl = Gtk.Label(label="Scanning for changes...")
+                lbl.set_halign(Gtk.Align.START)
+                row.append(lbl)
+                box.append(row)
+
+            elif info['done']:
                 done_row = Gtk.Box(spacing=8)
                 icon = Gtk.Image.new_from_icon_name('emblem-ok-symbolic')
                 icon.add_css_class('success')
                 done_row.append(icon)
-                label = Gtk.Label(label="Download complete")
-                label.add_css_class('heading')
-                done_row.append(label)
+
+                files_done = info.get('files_done', 0)
+                files_total = info.get('files_total', 0)
+                skipped = files_total - files_done - len(info.get('errors', []))
+                summary = f"{files_done} file(s) downloaded"
+                if skipped > 0:
+                    summary += f", {skipped} already up to date"
+                lbl = Gtk.Label(label=summary)
+                lbl.add_css_class('heading')
+                lbl.set_wrap(True)
+                done_row.append(lbl)
                 box.append(done_row)
 
                 for err in info.get('errors', []):
-                    err_label = Gtk.Label(label=f"⚠ {err}")
-                    err_label.add_css_class('error')
-                    err_label.set_wrap(True)
-                    err_label.set_halign(Gtk.Align.START)
-                    box.append(err_label)
+                    el = Gtk.Label(label=f"⚠ {err}")
+                    el.add_css_class('error')
+                    el.set_wrap(True)
+                    el.set_halign(Gtk.Align.START)
+                    box.append(el)
 
                 open_btn = Gtk.Button(label="Show in Files")
                 open_btn.add_css_class('flat')
                 open_btn.connect('clicked', self._open_in_files, info['local_path'])
                 box.append(open_btn)
+
             else:
-                label = Gtk.Label(label="Downloading...")
-                label.set_halign(Gtk.Align.START)
-                box.append(label)
+                files_done = info.get('files_done', 0)
+                files_total = info.get('files_total', 0)
+                lbl = Gtk.Label(label=f"Downloading... ({files_done}/{files_total} files)")
+                lbl.set_halign(Gtk.Align.START)
+                box.append(lbl)
 
                 progress = Gtk.ProgressBar()
                 frac = info['downloaded'] / info['total'] if info['total'] > 0 else 0
                 progress.set_fraction(min(frac, 1.0))
-                progress.set_text(f"{format_size(info['downloaded'])} / {format_size(info['total'])}")
+                progress.set_text(
+                    f"{format_size(info['downloaded'])} / {format_size(info['total'])}"
+                )
                 progress.set_show_text(True)
                 box.append(progress)
 
                 remaining = max(0, info['total'] - info['downloaded'])
-                rem_label = Gtk.Label(label=f"{format_size(remaining)} remaining")
-                rem_label.set_halign(Gtk.Align.START)
-                rem_label.add_css_class('dim-label')
-                box.append(rem_label)
+                rem_lbl = Gtk.Label(label=f"{format_size(remaining)} remaining")
+                rem_lbl.set_halign(Gtk.Align.START)
+                rem_lbl.add_css_class('dim-label')
+                box.append(rem_lbl)
 
             self.download_pop_box.append(box)
 
-    def _open_in_files(self, button, path):
+    def _open_in_files(self, _btn, path):
         launcher = Gtk.FileLauncher()
         launcher.set_file(Gio.File.new_for_path(path))
         launcher.open_containing_folder(self, None, None)
